@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>水面波のドップラー効果</title>
+<style>
+*{box-sizing:border-box} body{margin:0;background:#edf5f8;color:#173748;font:16px/1.55 system-ui,sans-serif}
+main{max-width:1120px;margin:auto;padding:18px} h1{margin:0 0 12px;font-size:clamp(1.4rem,4vw,2rem)}
+canvas,#paper{display:block;width:100%;aspect-ratio:8/5;border-radius:12px;background:#f6fafc}
+canvas{cursor:grab;touch-action:none}canvas:active{cursor:grabbing} #paper{display:none}
+.fields,.buttons{display:flex;flex-wrap:wrap;gap:10px}.marker-control{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;padding:7px} label{flex:1 1 155px}
+input,button{font:inherit;color:inherit;background:white;border:1px solid #829eab;border-radius:6px;padding:7px}
+input[type=number]{width:100%;display:block} button{cursor:pointer} p{margin:8px 0 14px}
+:focus-visible{outline:3px solid #087fa3;outline-offset:3px}
+@media print{body{background:white}main{padding:0}canvas,.controls,.guide{display:none}#paper{display:block;width:86%;margin-inline:auto;break-inside:avoid}h1{font-size:17pt}}
+fieldset{margin:10px 0;border:1px solid #a9bfca;border-radius:8px} legend{font-weight:600} .readout{font-size:.93rem} #observations{margin:6px 0 12px}
+
+.workspace > *{min-width:0}
+.controls{background:#f9fcfd;border:1px solid #c7dbe3;border-radius:12px;margin-top:12px}
+.quick-controls,.control-scroll{padding:12px}
+.quick-controls{border-bottom:1px solid #c7dbe3}
+.controls .fields > label{flex-basis:calc(50% - 5px);min-width:0;font-size:.88rem}
+.controls .buttons + .buttons{margin-top:8px}
+.controls fieldset{min-width:0}
+.control-scroll > :first-child{margin-top:0}
+@media screen and (min-width:850px){
+  main{max-width:1520px}
+  .workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,390px);gap:16px;align-items:start}
+  .controls{display:flex;flex-direction:column;margin-top:0;max-height:calc(100dvh - 80px)}
+  .control-scroll{min-height:0;overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain}
+  .display canvas{width:min(100%,max(320px,calc((100dvh - 186px) * 1.6)));margin-inline:auto}
+}
+.frequency-fields{flex:1 1 calc(50% - 5px);min-width:0}
+.frequency-fields label{display:block;font-size:.88rem}
+.frequency-fields label + label{margin-top:10px}
+.animation-toolbar{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+.animation-toolbar input{width:clamp(105px,38%,240px);accent-color:#087fa3;padding:0}
+.animation-toolbar output{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
+@media print{.animation-stage{display:none}}
+</style>
+<style id="page">@page{size:297mm 210mm;margin:12mm}</style>
+<main>
+<h1>水面波のドップラー効果</h1>
+<div class="workspace">
+<div class="display">
+<div class="animation-stage">
+<canvas id="view" width="800" height="500" tabindex="0" aria-label="水面波の立体表示。矢印キーで視点を回転できます。"></canvas>
+<div class="animation-toolbar">
+<label for="zoom" style="flex:none">表示倍率</label>
+<input id="zoom" type="range" min="50" max="300" step="5" value="100">
+<output id="zoomValue" for="zoom">100%</output>
+</div>
+</div>
+<img id="paper" alt="印刷用の水面波">
+<p id="summary"></p>
+<p id="observations" class="readout"></p>
+</div>
+<section class="controls" aria-label="シミュレーションの設定">
+<div class="quick-controls">
+<div class="buttons">
+<button id="play">一時停止</button><button id="restart">はじめから</button><button id="camera">視点を戻す</button>
+</div>
+<div class="buttons"><label class="marker-control"><input id="marker" type="checkbox" checked>波源マークを表示</label><label class="marker-control"><input id="axes" type="checkbox" checked>X・Y座標を表示</label></div>
+</div>
+<div class="control-scroll">
+<p class="guide">黄色が波源、ピンクが観測者A、紫が観測者Bです。ドラッグまたは矢印キーで視点を回せます。波源が表示範囲の端に達すると、全員が初期位置から再スタートします。再生速度は実時間に対する比率です。分母を1にすると実時間になります。</p>
+<div class="fields">
+<label>波源の初期 X (m)<input id="sourceX" type="number" min="-7" max="7" step="any" required></label>
+<label>波源の初期 Y (m)<input id="sourceY" type="number" min="-4" max="4" step="any" required></label>
+<label>波源の速度 Vx (m/s)<input id="sourceVx" type="number" step="any" required></label>
+<label>波源の速度 Vy (m/s)<input id="sourceVy" type="number" step="any" required></label>
+<label>波の伝わる速さ (m/s)<input id="wave" type="number" min="1" step="any" required></label>
+<label>波長 λ (m)<input id="length" type="number" min="0.25" max="12" step="any" required></label>
+<label>周期 T (s)<input id="period" type="number" min="0" step="any" required></label>
+<div class="frequency-fields">
+<label>振動数 f (Hz)<input id="frequency" type="number" min="0" step="any" required></label>
+<label>再生速度 (実時間の 1/N)<input id="timeDivisor" type="number" min="1" step="any" required></label>
+</div>
+</div>
+<fieldset><legend>観測者A</legend><div class="fields"><label>初期 X (m)<input id="aX" type="number" step="any" required></label><label>初期 Y (m)<input id="aY" type="number" step="any" required></label><label>速度 Vx (m/s)<input id="aVx" type="number" step="any" required></label><label>速度 Vy (m/s)<input id="aVy" type="number" step="any" required></label></div></fieldset>
+<fieldset><legend>観測者B</legend><div class="fields"><label>初期 X (m)<input id="bX" type="number" step="any" required></label><label>初期 Y (m)<input id="bY" type="number" step="any" required></label><label>速度 Vx (m/s)<input id="bVx" type="number" step="any" required></label><label>速度 Vy (m/s)<input id="bVy" type="number" step="any" required></label></div></fieldset>
+<p>λ = cT、f = 1/T。波長は静止波源での値です。Enter または入力欄を離れると値が確定します。波速を変えると周期を保って波長が変わります。</p>
+<div class="buttons">
+<button id="save">PNG保存（3840 × 2400）</button><button id="a4">A4横で印刷</button><button id="b5">B5横で印刷</button>
+</div>
+<div class="buttons">
+<button id="saveSettings" type="button">設定をJSONに保存</button>
+<button id="openSettings" type="button">設定をJSONから読み込む</button>
+<input id="settingsFile" type="file" accept=".json,application/json" hidden>
+</div>
+<p id="status" role="status"></p>
+</div>
+</section>
+</div>
+</main>
+<script>
+"use strict";
+const get = id => document.getElementById(id);
+const view = get("view");
+const start = { x: 0, y: 0 };
+const observers = [
+  { id: "a", name: "A", x: -2, y: 2, vx: 1.5, vy: -0.5, color: "#ff80af" },
+  { id: "b", name: "B", x: 4, y: -2, vx: -2, vy: 1, color: "#bc9aff" }
+];
+const state = {
+  vx: 4, vy: 0, wave: 340, period: 1 / 400, azimuth: -0.20,
+  elevation: 0.68, zoom: 100, time: 0, timeDivisor: 40, playing: true, showMarker: true, showAxes: true
+};
+const inside = (x, y) => Math.abs(x) <= 7 && Math.abs(y) <= 4;
+const position = (body, time) => ({ x: body.x + body.vx * time, y: body.y + body.vy * time });
+
+function arrivals(dx, dy, time, receive) {
+  const { vx, vy, wave } = state;
+  const distanceSquared = dx * dx + dy * dy;
+  const a = vx * vx + vy * vy - wave * wave;
+  const b = vx * dx + vy * dy;
+  const valid = delay => delay >= 0 && delay <= time;
+  if (distanceSquared < 1e-14) {
+    receive(0, 1);
+    return;
+  }
+  if (Math.abs(a) < 1e-8) {
+    const delay = -distanceSquared / (2 * b);
+    if (valid(delay)) receive(delay, 1);
+    return;
+  }
+
+  // |観測位置 − 放射時の波源位置| = 波速 × 放射からの経過時間。
+  const discriminant = b * b - a * distanceSquared;
+  if (discriminant < 0) return;
+  const root = Math.sqrt(discriminant);
+  const q = -b - (b >= 0 ? root : -root);
+  if (!q) return;
+  const first = q / a;
+  const second = distanceSquared / q;
+  const edge = a > 0 ? Math.min(1, root / (0.09 * wave)) : 1;
+  const weight = edge * edge * (3 - 2 * edge);
+  if (valid(first)) receive(first, weight);
+  if (root > 0 && valid(second)) receive(second, weight);
+}
+
+function heightAt(x, y, time) {
+  const { vx, vy, wave, period } = state;
+  let height = 0;
+  arrivals(x - start.x - vx * time, y - start.y - vy * time, time, (delay, weight) => {
+    const emitted = time - delay;
+    const fade = Math.min(1, emitted / (0.15 * period));
+    height += 0.16 * Math.sin(2 * Math.PI * emitted / period)
+      * fade * fade * (3 - 2 * fade) * weight / Math.sqrt(1 + 0.40 * wave * delay);
+  });
+  return height;
+}
+
+function receivedFrequencies(observer, point, time) {
+  const { vx, vy, wave, period } = state;
+  const dx = point.x - start.x - vx * time;
+  const dy = point.y - start.y - vy * time;
+  const frequencies = [];
+  arrivals(dx, dy, time, delay => {
+    const length = wave * delay;
+    if (length < 1e-8) return;
+    const nx = (dx + vx * delay) / length;
+    const ny = (dy + vy * delay) / length;
+    const denominator = wave - nx * vx - ny * vy;
+    const numerator = wave - nx * observer.vx - ny * observer.vy;
+    frequencies.push(Math.abs(numerator / denominator) / period);
+  });
+  return frequencies;
+}
+
+function makeRenderer(canvas) {
+  const context = canvas.getContext("2d");
+  const { width, height } = canvas;
+  const picture = context.createImageData(width, height);
+  const pixels = new Uint32Array(picture.data.buffer);
+  const depth = new Float32Array(width * height);
+  const packed = (r, g, b) => (255 << 24) | (b << 16) | (g << 8) | r;
+  const colors = Uint32Array.from({ length: 256 }, (_, i) =>
+    packed(12 + Math.round(i * 0.53), 61 + Math.round(i * 0.64), 92 + Math.round(i * 0.58)));
+
+  function triangle(a, b, c) {
+    const area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (Math.abs(area) < 1e-8) return;
+    const minX = Math.max(0, Math.ceil(Math.min(a.x, b.x, c.x) - 0.5));
+    const maxX = Math.min(width - 1, Math.floor(Math.max(a.x, b.x, c.x) - 0.5));
+    const minY = Math.max(0, Math.ceil(Math.min(a.y, b.y, c.y) - 0.5));
+    const maxY = Math.min(height - 1, Math.floor(Math.max(a.y, b.y, c.y) - 0.5));
+    const du = (b.y - c.y) / area;
+    const dv = (c.y - a.y) / area;
+    const dw = -du - dv;
+    for (let y = minY; y <= maxY; y++) {
+      const py = y + 0.5;
+      const px = minX + 0.5;
+      let u = du * (px - c.x) + (c.x - b.x) * (py - c.y) / area;
+      let v = dv * (px - c.x) + (a.x - c.x) * (py - c.y) / area;
+      let w = 1 - u - v;
+      for (let x = minX; x <= maxX; x++, u += du, v += dv, w += dw) {
+        if (Math.min(u, v, w) < -1e-7) continue;
+        const z = u * a.depth + v * b.depth + w * c.depth;
+        const index = y * width + x;
+        if (z <= depth[index]) continue;
+        depth[index] = z;
+        pixels[index] = colors[Math.round(u * a.shade + v * b.shade + w * c.shade)];
+      }
+    }
+  }
+
+  return function draw(time, columns, rows) {
+    pixels.fill(packed(246, 250, 252));
+    depth.fill(-Infinity);
+    const ca = Math.cos(state.azimuth), sa = Math.sin(state.azimuth);
+    const ce = Math.cos(state.elevation), se = Math.sin(state.elevation);
+    const scale = Math.min(width / 17, height / 13) * state.zoom / 100;
+    const dx = 14 / columns, dy = 8 / rows;
+    const stride = columns + 1;
+    const heights = new Float32Array(stride * (rows + 1));
+    const points = [];
+
+    function project(x, y, z, shade) {
+      const across = x * ca + y * sa;
+      const forward = -x * sa + y * ca;
+      return {
+        x: width / 2 + across * scale,
+        y: height / 2 + (forward * se - z * ce) * scale,
+        depth: forward * ce + z * se,
+        shade
+      };
+    }
+
+    for (let j = 0; j <= rows; j++) {
+      for (let i = 0; i <= columns; i++) {
+        heights[j * stride + i] = heightAt(-7 + i * dx, -4 + j * dy, time);
+      }
+    }
+    for (let j = 0; j <= rows; j++) {
+      const above = Math.max(0, j - 1), below = Math.min(rows, j + 1);
+      for (let i = 0; i <= columns; i++) {
+        const left = Math.max(0, i - 1), right = Math.min(columns, i + 1);
+        const z = heights[j * stride + i];
+        const sx = (heights[j * stride + right] - heights[j * stride + left]) / ((right - left) * dx);
+        const sy = (heights[below * stride + i] - heights[above * stride + i]) / ((below - above) * dy);
+        const diffuse = (0.76 + 0.4 * sx + 0.51 * sy) / Math.hypot(1, sx, sy);
+        const shade = Math.max(0, Math.min(255, 105 + 245 * (diffuse - 0.62) + 190 * z));
+        points.push(project(-7 + i * dx, -4 + j * dy, z, shade));
+      }
+    }
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < columns; i++) {
+        const a = j * stride + i;
+        triangle(points[a], points[a + 1], points[a + stride]);
+        triangle(points[a + 1], points[a + stride + 1], points[a + stride]);
+      }
+    }
+    context.putImageData(picture, 0, 0);
+    const unit = width / 800;
+    function line(a, b, color, weight) {
+      context.strokeStyle = color;
+      context.lineWidth = weight * unit;
+      context.beginPath();
+      context.moveTo(a.x, a.y);
+      context.lineTo(b.x, b.y);
+      context.stroke();
+    }
+    function label(text, point, color) {
+      context.font = "bold " + 13 * unit + "px system-ui";
+      context.lineWidth = 3 * unit;
+      context.strokeStyle = "#f6fafc";
+      context.strokeText(text, point.x + 4 * unit, point.y - 4 * unit);
+      context.fillStyle = color;
+      context.fillText(text, point.x + 4 * unit, point.y - 4 * unit);
+    }
+    if (state.showAxes) {
+      for (let x = -6; x <= 6; x += 2) {
+        if (x) line(project(x, -4, 0), project(x, 4, 0), "#e5f8fa52", 1);
+      }
+      for (let y = -4; y <= 4; y += 2) {
+        if (y) line(project(-7, y, 0), project(7, y, 0), "#e5f8fa52", 1);
+      }
+      line(project(-7, 0, 0), project(7, 0, 0), "#effcfdcc", 1.4);
+      line(project(0, -4, 0), project(0, 4, 0), "#effcfdcc", 1.4);
+      label("X (m)", project(7, 0, 0), "#173748");
+      label("Y (m)", project(0, 4, 0), "#173748");
+      label("0", project(0, 0, 0), "#173748");
+      for (const value of [-6, -4, -2, 2, 4, 6]) {
+        label(String(value), project(value, 0, 0), "#173748");
+      }
+      for (const value of [-4, -2, 2]) {
+        label(String(value), project(0, value, 0), "#173748");
+      }
+    }
+
+    function marker(x, y, color, name) {
+      if (!inside(x, y)) return;
+      const z = heightAt(x, y, time);
+      const base = project(x, y, z);
+      const point = project(x, y, z + 0.23);
+      line(base, point, "#24334b", 1.5);
+      context.beginPath();
+      context.arc(point.x, point.y, width / 155, 0, 2 * Math.PI);
+      context.fillStyle = color;
+      context.fill();
+      context.stroke();
+      if (name) label(name, { x: point.x + 5 * unit, y: point.y }, "#173748");
+    }
+    if (state.showMarker) {
+      marker(start.x + state.vx * time, start.y + state.vy * time, "#ffdc63", "");
+    }
+    for (const observer of observers) {
+      const point = position(observer, time);
+      marker(point.x, point.y, observer.color, observer.name);
+    }
+  };
+}
+
+const draw = makeRenderer(view);
+let cutoff = Infinity;
+function updateCutoff() {
+  const { vx, vy } = state;
+  const tx = vx > 0 ? (7 - start.x) / vx : vx < 0 ? (-7 - start.x) / vx : Infinity;
+  const ty = vy > 0 ? (4 - start.y) / vy : vy < 0 ? (-4 - start.y) / vy : Infinity;
+  cutoff = Math.min(tx, ty);
+}
+function updateObservations() {
+  const time = state.time;
+  const readings = observers.map(observer => {
+    const point = position(observer, time);
+    const received = receivedFrequencies(observer, point, time);
+    const frequency = received.length
+      ? received.map(value => Number.isFinite(value) ? value.toFixed(2) + " Hz" : "∞").join(" / ")
+      : "—";
+    const coords = state.showAxes ? " (" + point.x.toFixed(2) + ", " + point.y.toFixed(2) + ") m" : "";
+    return "観測者" + observer.name + coords + "　受信 " + frequency + (inside(point.x, point.y) ? "" : "［表示範囲外］");
+  });
+  get("observations").textContent = readings.join("　│　");
+}
+let frame = 0;
+let previous;
+function refresh() {
+  if (!frame) frame = requestAnimationFrame(tick);
+}
+function tick(now) {
+  frame = 0;
+  if (state.playing && previous !== undefined) {
+    state.time += (now - previous) / 1000 / state.timeDivisor;
+    if (cutoff === 0) state.time = 0;
+    else if (Number.isFinite(cutoff)) state.time %= cutoff;
+  }
+  previous = state.playing ? now : undefined;
+  draw(state.time, 200, 114);
+  updateObservations();
+  if (state.playing) refresh();
+}
+function restart() {
+  updateCutoff();
+  state.time = 0;
+  previous = undefined;
+  refresh();
+}
+
+const format = value => String(Number(value.toPrecision(8)));
+const modelFields = new Map([
+  ["sourceX", [start, "x"]], ["sourceY", [start, "y"]],
+  ["sourceVx", [state, "vx"]], ["sourceVy", [state, "vy"]],
+  ["timeDivisor", [state, "timeDivisor"]]
+]);
+for (const observer of observers) {
+  for (const [suffix, key] of [["X", "x"], ["Y", "y"], ["Vx", "vx"], ["Vy", "vy"]]) {
+    modelFields.set(observer.id + suffix, [observer, key]);
+  }
+}
+function fieldValues() {
+  const values = {
+    wave: state.wave, length: state.wave * state.period,
+    period: state.period, frequency: 1 / state.period
+  };
+  for (const [id, [body, key]] of modelFields) values[id] = body[key];
+  return values;
+}
+function updateFields() {
+  for (const [id, value] of Object.entries(fieldValues())) get(id).value = format(value);
+  get("summary").textContent =
+    "波源速度 (" + format(state.vx) + ", " + format(state.vy) + ") m/s　" +
+    "波速 " + get("wave").value + " m/s　λ " + get("length").value +
+    " m　T " + get("period").value + " s　f " + get("frequency").value + " Hz";
+}
+for (const id of Object.keys(fieldValues())) {
+  const input = get(id);
+  function commit() {
+    input.setCustomValidity("");
+    if (!input.reportValidity()) return;
+    const value = input.valueAsNumber;
+    if (!Number.isFinite(value) || input.value === format(fieldValues()[id])) return;
+    const wave = id === "wave" ? value : state.wave;
+    let period = state.period;
+    if (id === "length") period = value / wave;
+    if (id === "period") period = value;
+    if (id === "frequency") period = 1 / value;
+    if (wave * period < 0.25 - 1e-8 || wave * period > 12 + 1e-8) {
+      input.setCustomValidity("波長が 0.25〜12 m になる値を入力してください。");
+      input.reportValidity();
+      return;
+    }
+    const field = modelFields.get(id);
+    if (field) field[0][field[1]] = value;
+    state.wave = wave;
+    state.period = period;
+    updateFields();
+    if (id !== "timeDivisor") restart();
+    else previous = undefined;
+  }
+  input.addEventListener("change", commit);
+  input.addEventListener("input", () => input.setCustomValidity(""));
+  input.addEventListener("keydown", event => {
+    if (event.key === "Enter") commit();
+    if (event.key === "Escape") {
+      input.setCustomValidity("");
+      updateFields();
+    }
+  });
+}
+function rotate(x, y) {
+  state.azimuth = (state.azimuth + x) % (2 * Math.PI);
+  state.elevation = Math.max(0.22, Math.min(1.40, state.elevation + y));
+  refresh();
+}
+let drag;
+view.addEventListener("pointerdown", event => {
+  if (event.button !== 0 || drag) return;
+  view.setPointerCapture(event.pointerId);
+  drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+});
+view.addEventListener("pointermove", event => {
+  if (drag?.id !== event.pointerId) return;
+  rotate((event.clientX - drag.x) * 0.010, (event.clientY - drag.y) * 0.008);
+  drag.x = event.clientX;
+  drag.y = event.clientY;
+});
+for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  view.addEventListener(type, event => {
+    if (drag?.id === event.pointerId) drag = undefined;
+  });
+}
+view.addEventListener("keydown", event => {
+  const directions = { ArrowLeft: [-0.08, 0], ArrowRight: [0.08, 0],
+    ArrowUp: [0, 0.06], ArrowDown: [0, -0.06] };
+  if (!directions[event.key]) return;
+  event.preventDefault();
+  rotate(...directions[event.key]);
+});
+const zoomSlider = get("zoom");
+function updateZoom() {
+  zoomSlider.value = String(state.zoom);
+  get("zoomValue").textContent = state.zoom + "%";
+}
+zoomSlider.addEventListener("input", () => {
+  state.zoom = zoomSlider.valueAsNumber;
+  updateZoom();
+  refresh();
+});
+
+get("camera").onclick = () => {
+  state.azimuth = -0.20;
+  state.elevation = 0.68;
+  refresh();
+};
+get("marker").addEventListener("change", event => {
+  state.showMarker = event.currentTarget.checked;
+  refresh();
+});
+get("axes").addEventListener("change", event => {
+  state.showAxes = event.currentTarget.checked;
+  refresh();
+});
+get("restart").onclick = restart;
+get("play").onclick = () => {
+  state.playing = !state.playing;
+  previous = undefined;
+  get("play").textContent = state.playing ? "一時停止" : "再生";
+  refresh();
+};
+
+function snapshot() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 3840;
+  canvas.height = 2400;
+  makeRenderer(canvas)(state.time, 500, 286);
+  return canvas;
+}
+get("save").onclick = () => {
+  get("status").textContent = "";
+  snapshot().toBlob(blob => {
+    if (!blob) {
+      get("status").textContent = "PNGを作成できませんでした。";
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "doppler-water-waves.png";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }, "image/png");
+};
+const paper = get("paper");
+let printing = false;
+async function printPage(width, height) {
+  if (printing) return;
+  printing = true;
+  get("status").textContent = "";
+  try {
+    get("page").textContent = "@page{size:" + width + "mm " + height + "mm;margin:12mm}";
+    paper.src = snapshot().toDataURL("image/png");
+    await paper.decode();
+    window.print();
+  } catch {
+    get("status").textContent = "印刷用の画像を作成できませんでした。";
+  } finally {
+    printing = false;
+    previous = undefined;
+  }
+}
+get("a4").onclick = () => printPage(297, 210);
+get("b5").onclick = () => printPage(257, 182);
+window.addEventListener("beforeprint", () => {
+  if (!printing) paper.src = snapshot().toDataURL("image/png");
+});
+const settingsKey = "doppler-water-waves.settings.v1";
+const settingsFile = get("settingsFile");
+
+function encodeSettings() {
+  const { wave, period, azimuth, elevation, showAxes, showMarker, zoom } = state;
+  const parameters = { wave, period };
+  for (const [id, [body, key]] of modelFields) parameters[id] = body[key];
+  return JSON.stringify({
+    version: 2, parameters, view: { azimuth, elevation, showAxes, showMarker, zoom }
+  }, null, 2);
+}
+
+function restoreSettings(text) {
+  const data = JSON.parse(text);
+  const parameters = data?.version === 1 && data.parameters
+    ? { ...data.parameters, sourceX: 0, sourceY: 0, timeDivisor: 40 }
+    : data?.parameters;
+  const viewSettings = data?.view;
+  const zoom = viewSettings?.zoom === undefined ? 100 : viewSettings.zoom;
+  const numericFields = ["wave", "period", ...modelFields.keys()];
+  const wavelength = parameters?.wave * parameters?.period;
+  if ((data?.version !== 1 && data?.version !== 2) || !parameters || !viewSettings ||
+      !numericFields.every(id => Number.isFinite(parameters[id])) ||
+      parameters.wave < 1 || parameters.period <= 0 || parameters.timeDivisor < 1 ||
+      !inside(parameters.sourceX, parameters.sourceY) ||
+      wavelength < 0.25 - 1e-8 || wavelength > 12 + 1e-8 ||
+      !Number.isFinite(viewSettings.azimuth) ||
+      Math.abs(viewSettings.azimuth) > 2 * Math.PI ||
+      !Number.isFinite(viewSettings.elevation) ||
+      viewSettings.elevation < 0.22 || viewSettings.elevation > 1.40 ||
+      !Number.isInteger(zoom) || zoom < 50 || zoom > 300 || zoom % 5 !== 0 ||
+      typeof viewSettings.showAxes !== "boolean" ||
+      typeof viewSettings.showMarker !== "boolean") {
+    throw new Error("Invalid settings");
+  }
+
+  for (const [id, [body, key]] of modelFields) body[key] = parameters[id];
+  state.wave = parameters.wave;
+  state.period = parameters.period;
+  state.azimuth = viewSettings.azimuth;
+  state.elevation = viewSettings.elevation;
+  state.zoom = zoom;
+  updateZoom();
+  state.showAxes = viewSettings.showAxes;
+  state.showMarker = viewSettings.showMarker;
+  get("axes").checked = state.showAxes;
+  get("marker").checked = state.showMarker;
+  for (const id of Object.keys(fieldValues())) get(id).setCustomValidity("");
+}
+
+function rememberSettings(text) {
+  try {
+    localStorage.setItem(settingsKey, text);
+  } catch {
+    // ブラウザーの保存領域が使えなくても、JSONの読み書きは可能。
+  }
+}
+
+get("saveSettings").onclick = () => {
+  const text = encodeSettings();
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "doppler-settings.json";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  rememberSettings(text);
+};
+
+get("openSettings").onclick = () => settingsFile.click();
+settingsFile.addEventListener("change", async () => {
+  const file = settingsFile.files[0];
+  settingsFile.value = "";
+  if (!file) return;
+  try {
+    restoreSettings(await file.text());
+    updateFields();
+    restart();
+    rememberSettings(encodeSettings());
+    get("status").textContent = "設定を読み込みました。";
+  } catch {
+    get("status").textContent = "設定を読み込めませんでした。この教材で保存したJSONファイルを選んでください。";
+  }
+});
+
+try {
+  const remembered = localStorage.getItem(settingsKey);
+  if (remembered) restoreSettings(remembered);
+} catch {
+  // 保存領域が利用できない場合や、保存データが無効な場合は初期値を使う。
+}
+updateFields();
+updateCutoff();
+refresh();
+</script>
+</html>
+

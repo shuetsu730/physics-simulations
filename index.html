@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="高校物理の授業で使える、音と波のシミュレーション教材。">
+  <title>物理シミュレーション | Shuetsu</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #101824;
+      color: #f5f8fb;
+      font: 1rem/1.7 system-ui, sans-serif;
+    }
+    main { width: min(960px, 100% - 2rem); margin: auto; padding: clamp(2rem, 7vw, 5rem) 0 2rem; }
+    header { border-bottom: 1px solid #40536a; padding-bottom: 1.5rem; margin-bottom: 1.5rem; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1.25; }
+    h2 { font-size: 1.45rem; line-height: 1.4; margin: .4rem 0; }
+    p { margin: .45rem 0; color: #c4d2df; }
+    .apps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+    article {
+      --accent: #8eebd7;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      border: 1px solid #40536a;
+      border-top: 4px solid var(--accent);
+      border-radius: .8rem;
+      padding: 1.35rem;
+      background: #1b2838;
+    }
+    article:nth-child(2) { --accent: #cbb8ff; }
+    .topic { color: var(--accent); font-size: .9rem; font-weight: 700; }
+    a { color: #10202a; background: var(--accent); padding: .5rem .9rem; border-radius: .4rem; text-decoration: none; font-weight: 700; }
+    a:hover { filter: brightness(1.12); }
+    a:focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
+    .description { margin-bottom: 1.15rem; flex: 1; }
+    footer { margin-top: 1.5rem; color: #c4d2df; font-size: .875rem; }
+    @media (max-width: 640px) { .apps { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>物理シミュレーション</h1>
+      <p>高校物理の授業で使える、音と波のシミュレーション教材です。</p>
+    </header>
+    <section class="apps" aria-label="シミュレーション一覧">
+      <article>
+        <p class="topic">フーリエ解析・音の合成</p>
+        <h2>Shuchan FS</h2>
+        <p class="description">録音や音声ファイルの波形と周波数スペクトルを観察し、合成した音を鍵盤で鳴らします。</p>
+        <a href="./Fourier%20Synthesizer.html">Shuchan FSを開く</a>
+      </article>
+      <article>
+        <p class="topic">波の伝わり方</p>
+        <h2>ドップラー効果</h2>
+        <p class="description">波源が動くと、進行方向の前後で波面の間隔がどう変化するかを観察します。</p>
+        <a href="./doppler-water-waves.html">ドップラー効果を開く</a>
+      </article>
+    </section>
+    <footer>作成者 Shuetsu</footer>
+  </main>
+</body>
+</html>
